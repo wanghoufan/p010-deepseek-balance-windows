@@ -42,11 +42,11 @@ public sealed class OpenCodeQuotaAlertEvaluator
                 continue;
             }
 
-            // 进入新周期（ResetsAt 严格前进超过抖动容忍窗口）时清空已通知档位，
+            // 进入新周期（ResetsAt 严格前进超过 30 分钟）时清空已通知档位，
             // 使下一周期的低量预警可以重新触发；OpenCode 本身不播报恢复。
             bool isNewCycle = window.ResetsAt.HasValue
                               && state.LastResetsAt.HasValue
-                              && window.ResetsAt.Value - state.LastResetsAt.Value > CodexQuotaAlertEvaluator.CycleJitterTolerance;
+                              && window.ResetsAt.Value - state.LastResetsAt.Value > CodexQuotaAlertEvaluator.NewCycleMinAdvance;
             if (isNewCycle) state.ResetCycle();
 
             // 低量预警：一次刷新只播报跨过的最低档位，档位记录去重直到恢复。

@@ -21,6 +21,12 @@ public sealed class CodexQuotaWindowState
     /// <summary>上次播报「额度已恢复」的时间，用于吸收阈值附近抖动的重复播报。</summary>
     public DateTimeOffset? LastRecoveryAlertUtc { get; set; }
 
+    /// <summary>
+    /// 已播报过「恢复」的那个周期的 ResetsAt 值：同一个重置时间只播报一次恢复，
+    /// 防止 ResetsAt 抖动或同类型多窗口拉扯导致恢复提醒反复弹出。
+    /// </summary>
+    public DateTimeOffset? RecoveryAnnouncedResetsAt { get; set; }
+
     /// <summary>进入新周期：清空已提醒档位，使下一周期可以重新提醒。</summary>
     public void ResetCycle() => NotifiedThresholds.Clear();
 }

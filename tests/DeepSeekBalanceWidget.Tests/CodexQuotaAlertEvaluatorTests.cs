@@ -147,7 +147,7 @@ public class CodexQuotaAlertEvaluatorTests
     }
 
     [Fact]
-    public void ResetsAtJitter_WithinTolerance_NotTreatedAsNewCycle()
+    public void ResetsAtSmallAdvance_NotTreatedAsNewCycle()
     {
         var evaluator = new CodexQuotaAlertEvaluator();
         var cfg = Cfg();
@@ -155,10 +155,51 @@ public class CodexQuotaAlertEvaluatorTests
         evaluator.Evaluate(new[] { Account("a", Win(60, FiveHourMinutes, Cycle1Reset)) }, cfg, Now);
         evaluator.Evaluate(new[] { Account("a", Win(5, FiveHourMinutes, Cycle1Reset)) }, cfg, Now);
 
-        // ResetsAt 只前进 30 秒（小于 1 分钟抖动容忍窗口）：不视为新周期，
-        // 既不播报恢复，也不清空档位记录。
+        // ResetsAt 只前进 10 分钟（远小于真周期前进量 5 小时，也小于 30 分钟阈值）：
+        // 视为 API 抖动/滚动重算，既不播报恢复，也不清空档位记录。
         Assert.Empty(evaluator.Evaluate(
-            new[] { Account("a", Win(100, FiveHourMinutes, Cycle1Reset.AddSeconds(30))) }, cfg, Now));
+            new[] { Account("a", Win(100, FiveHourMinutes, Cycle1Reset.AddMinutes(10))) }, cfg, Now));
+    }
+
+    [Fact]
+    public void DuplicateKindWindows_RecoveryAnnouncedAtMostOnce()
+    {
+        // 回归测试（2026-09-02）：API 可能同时携带两个 ≤5h 的窗口，都被归类为 5h。
+        // 旧逻辑下 ResetsAt 较小的窗口每次刷新把 LastResetsAt 拉回小值，
+        // 使另一窗口永远"看似进入新周期"，恢复提醒随冷却（此处设 0）每轮都弹。
+        var evaluator = new CodexQuotaAlertEvaluator();
+        var cfg = Cfg();
+        var shortWindow = Win(100, 60, Cycle1Reset);
+        var longWindow = Win(100, FiveHourMinutes, Cycle2Reset);
+
+        // 基线 + 多轮刷新：每类只评估一个代表窗口，不应出现任何恢复播报。
+        evaluator.Evaluate(new[] { Account("a", shortWindow, longWindow) }, cfg, Now);
+        Assert.Empty(evaluator.Evaluate(
+            new[] { Account("a", shortWindow, longWindow) }, cfg, Now.AddMinutes(1)));
+        Assert.Empty(evaluator.Evaluate(
+            new[] { Account("a", shortWindow, longWindow) }, cfg, Now.AddMinutes(2)));
+        Assert.Empty(evaluator.Evaluate(
+            new[] { Account("a", shortWindow, longWindow) }, cfg, Now.AddMinutes(10)));
+    }
+
+    [Fact]
+    public void Recovery_CanAnnounceAgain_OnGenuineNextCycle()
+    {
+        // 恢复提醒只去重「同一个 ResetsAt」；真正进入下一个新周期时必须再次播报。
+        var evaluator = new CodexQuotaAlertEvaluator();
+        var cfg = Cfg();
+        var cycle3Reset = Cycle2Reset.AddHours(5);
+
+        evaluator.Evaluate(new[] { Account("a", Win(80, FiveHourMinutes, Cycle1Reset)) }, cfg, Now);
+        evaluator.Evaluate(new[] { Account("a", Win(5, FiveHourMinutes, Cycle1Reset)) }, cfg, Now);
+        Assert.Single(evaluator.Evaluate(
+            new[] { Account("a", Win(100, FiveHourMinutes, Cycle2Reset)) }, cfg, Now));
+
+        evaluator.Evaluate(new[] { Account("a", Win(15, FiveHourMinutes, Cycle2Reset)) }, cfg, Now.AddMinutes(5));
+
+        var second = Assert.Single(evaluator.Evaluate(
+            new[] { Account("a", Win(100, FiveHourMinutes, cycle3Reset)) }, cfg, Now.AddMinutes(10)));
+        Assert.True(second.IsRecovery);
     }
 
     [Fact]
